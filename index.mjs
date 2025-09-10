@@ -1,6 +1,8 @@
 import { chromium } from '@playwright/test';
 import { writeFileSync, mkdirSync } from 'fs';
 
+console.log('MARKER: DOMCONTENTLOADED BUILD v2');  // <-- must appear in logs
+
 const ORIGIN = 'https://ua.tribuna.com';
 const SOURCE = `${ORIGIN}/news/`;
 const MAX_ITEMS = 25;
