@@ -1,41 +1,73 @@
 import { chromium } from '@playwright/test';
 import { writeFileSync, mkdirSync } from 'fs';
 
-const SOURCE = 'https://ua.tribuna.com/news/';
+const ORIGIN = 'https://ua.tribuna.com';
+const SOURCE = `${ORIGIN}/news/`;
 const MAX_ITEMS = 25;
 
-function esc(s=''){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-async function run(){
+async function run() {
   const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (GitHubActions Playwright RSS)' });
+  const ctx = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (GitHubActions Playwright RSS)',
+    locale: 'uk-UA'
+  });
   const page = await ctx.newPage();
-  await page.goto(SOURCE, { waitUntil: 'networkidle' });
 
-  // Click "Main news" tab (UA/RU)
-  try {
-    const btn = await page.locator('a:has-text("Головні новини"), a:has-text("Главные новости")').first();
-    if (await btn.count()) await btn.click();
-  } catch {}
-
+  // Load and settle
+  await page.goto(SOURCE, { waitUntil: 'networkidle', timeout: 60000 });
   await page.waitForTimeout(1200);
 
-  const items = await page.evaluate((MAX_ITEMS) => {
-    const anchors = Array.from(document.querySelectorAll('a[href*="/news/"]'));
-    const seen = new Set(), out = [];
-    for (const a of anchors) {
-      const href = a.href;
-      if (!/\/news\/\d+/.test(href)) continue;
+  // Try to switch to "Main news" (UA/RU/EN just in case)
+  try {
+    const tab = page.locator('a:has-text("Головні новини"), a:has-text("Главные новости"), a:has-text("Main news")').first();
+    if (await tab.count()) {
+      await tab.click();
+      await page.waitForTimeout(1200);
+    }
+  } catch {}
+
+  // Some pages render more after a scroll
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(600);
+
+  // Grab links from DOM (rendered HTML)
+  const raw = await page.$$eval('a[href*="/news/"]', (as) => {
+    const out = [];
+    const seen = new Set();
+    for (const a of as) {
+      let href = a.getAttribute('href') || '';
+      const text = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+
+      // Normalize to absolute
+      if (href && !href.startsWith('http')) {
+        if (href.startsWith('//')) href = 'https:' + href;
+        else if (href.startsWith('/')) href = 'https://ua.tribuna.com' + href;
+        else href = 'https://ua.tribuna.com/' + href;
+      }
+
+      if (!href) continue;
+      // Accept /news/123456 or /news/123456-title
+      if (!/\/news\/\d+(?:[-/]|$)/.test(href)) continue;
+      if (/\/video|\/live/i.test(href)) continue; // skip video/live if present
       if (seen.has(href)) continue;
       seen.add(href);
-      let title = (a.textContent || a.getAttribute('title') || href).replace(/\s+/g,' ').trim();
-      out.push({ href, title });
-      if (out.length >= MAX_ITEMS) break;
+
+      out.push({ href, title: text || href });
+      if (out.length >= 100) break; // raw pool; we’ll trim later
     }
     return out;
-  }, MAX_ITEMS);
+  });
 
   await browser.close();
+
+  // Keep top unique items
+  const items = Array.from(new Map(raw.map(i => [i.href, i])).values()).slice(0, MAX_ITEMS);
+
+  // Log to Actions output (helps debugging)
+  console.log(`Collected ${items.length} items`);
+  items.slice(0, 5).forEach((i, idx) => console.log(`#${idx+1}`, i.title, i.href));
 
   const now = new Date().toUTCString();
   const rssItems = items.map(it => `
