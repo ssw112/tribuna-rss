@@ -1,0 +1,11 @@
+{
+  "name": "tribuna-rss",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node index.mjs"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.47.2"
+  }
+}
