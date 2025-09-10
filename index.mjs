@@ -4,19 +4,15 @@ import { writeFileSync, mkdirSync } from 'fs';
 const SOURCE = 'https://ua.tribuna.com/news/';
 const MAX_ITEMS = 25;
 
-function esc(s='') {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function esc(s=''){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-async function run() {
+async function run(){
   const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (GitHubActions Playwright RSS)'
-  });
+  const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (GitHubActions Playwright RSS)' });
   const page = await ctx.newPage();
   await page.goto(SOURCE, { waitUntil: 'networkidle' });
 
-  // Try to activate “Main news” tab (UA/RU)
+  // Click "Main news" tab (UA/RU)
   try {
     const btn = await page.locator('a:has-text("Головні новини"), a:has-text("Главные новости")').first();
     if (await btn.count()) await btn.click();
@@ -32,10 +28,7 @@ async function run() {
       if (!/\/news\/\d+/.test(href)) continue;
       if (seen.has(href)) continue;
       seen.add(href);
-
-      let title = (a.textContent || a.getAttribute('title') || href)
-        .replace(/\s+/g,' ')
-        .trim();
+      let title = (a.textContent || a.getAttribute('title') || href).replace(/\s+/g,' ').trim();
       out.push({ href, title });
       if (out.length >= MAX_ITEMS) break;
     }
@@ -68,7 +61,4 @@ async function run() {
   console.log(`Wrote docs/feed.xml with ${items.length} items`);
 }
 
-run().catch(e => {
-  console.error(e);
-  process.exit(1);
-});
+run().catch(e => { console.error(e); process.exit(1); });
