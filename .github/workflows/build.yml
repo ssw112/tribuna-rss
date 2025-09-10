@@ -1,18 +1,12 @@
-name: Build RSS
-
-on:
-  schedule:
-    - cron: "0 */2 * * *"   # every 2 hours
-  workflow_dispatch: {}
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - region: default
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,21 +22,3 @@ jobs:
 
       - name: Build RSS
         run: npm run build
-
-      - name: Commit feed if changed
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: 'docs/feed.xml'
-          message: 'Update RSS from Actions'
-          default_author: github_actions
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './docs'
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/deploy-pages@v4
