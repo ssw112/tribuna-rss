@@ -10,64 +10,55 @@ const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,
 async function run() {
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-setuid-sandbox'
-    ]
+    args: ['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--disable-setuid-sandbox']
   });
 
   const ctx = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     locale: 'uk-UA',
     timezoneId: 'Europe/Kyiv',
     extraHTTPHeaders: { 'Accept-Language': 'uk-UA,uk;q=0.9,ru;q=0.7,en;q=0.6' }
   });
 
-  // Hide webdriver
   await ctx.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
   const page = await ctx.newPage();
 
-  // Load the page (be tolerant)
+  // --- Load page (no networkidle!)
   await page.goto(SOURCE, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForTimeout(1500);
 
-  // Try clicking "Main news" tab (UA/RU/EN)
+  // Try clicking “Main news” tab (UA/RU/EN)
   try {
-    const tab = page.locator(
-      'a:has-text("Головні новини"), a:has-text("Главные новости"), a:has-text("Main news")'
-    ).first();
+    const tab = page.locator('a:has-text("Головні новини"), a:has-text("Главные новости"), a:has-text("Main news")').first();
     if (await tab.count()) {
       await tab.click();
       await page.waitForTimeout(1200);
     }
   } catch {}
 
-  // Wait for any news anchor to appear (up to 60s)
+  // Wait up to 60s for any news link to appear; if not, reload once.
   try {
     await page.waitForSelector('a[href*="/news/"]', { timeout: 60000 });
   } catch {
-    // Dump a bit of HTML to logs for debugging
-    const html = await page.content();
-    console.log('First 2000 chars of HTML:\n', html.slice(0, 2000));
+    console.log('No anchors yet — reloading once…');
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
+    await page.waitForTimeout(2000);
   }
 
-  // Scroll a bit to trigger lazy content
+  // Nudge lazy loads
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(800);
 
-  // Collect links from the rendered DOM
+  // Collect anchors
   const raw = await page.$$eval('a[href*="/news/"]', (as) => {
     const out = [];
     const seen = new Set();
     for (const a of as) {
       let href = a.getAttribute('href') || '';
-      let text = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      let text = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g,' ').trim();
 
       if (href && !href.startsWith('http')) {
         if (href.startsWith('//')) href = 'https:' + href;
@@ -91,7 +82,7 @@ async function run() {
 
   const items = Array.from(new Map(raw.map(i => [i.href, i])).values()).slice(0, MAX_ITEMS);
   console.log(`Collected ${items.length} items`);
-  items.slice(0, 5).forEach((i, idx) => console.log(`#${idx + 1}`, i.title, i.href));
+  items.slice(0, 5).forEach((i, idx) => console.log(`#${idx+1}`, i.title, i.href));
 
   const now = new Date().toUTCString();
   const rssItems = items.map(it => `
