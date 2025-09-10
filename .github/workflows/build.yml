@@ -21,9 +21,10 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Show goto line we will run
         run: |
-          echo "==== index.mjs header ===="
-          head -n 20 index.mjs
-          echo "==== grep goto ===="
-          grep -n "page.goto" index.mjs || true
-      - name: Build RSS
+      - name: Show file header and goto line
+        run: |
+          echo "=== HEAD ==="
+          head -n 30 index.mjs
+          echo "=== GOTO ==="
+          grep -n "page.goto" index.mjs || true      - name: Build RSS
         run: npm run build
