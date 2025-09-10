@@ -8,39 +8,67 @@ const MAX_ITEMS = 25;
 const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 async function run() {
-  const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (GitHubActions Playwright RSS)',
-    locale: 'uk-UA'
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-setuid-sandbox'
+    ]
   });
+
+  const ctx = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    locale: 'uk-UA',
+    timezoneId: 'Europe/Kyiv',
+    extraHTTPHeaders: { 'Accept-Language': 'uk-UA,uk;q=0.9,ru;q=0.7,en;q=0.6' }
+  });
+
+  // Hide webdriver
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
   const page = await ctx.newPage();
 
-  // Load and settle
-  await page.goto(SOURCE, { waitUntil: 'networkidle', timeout: 60000 });
-  await page.waitForTimeout(1200);
+  // Load the page (be tolerant)
+  await page.goto(SOURCE, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.waitForTimeout(1500);
 
-  // Try to switch to "Main news" (UA/RU/EN just in case)
+  // Try clicking "Main news" tab (UA/RU/EN)
   try {
-    const tab = page.locator('a:has-text("Головні новини"), a:has-text("Главные новости"), a:has-text("Main news")').first();
+    const tab = page.locator(
+      'a:has-text("Головні новини"), a:has-text("Главные новости"), a:has-text("Main news")'
+    ).first();
     if (await tab.count()) {
       await tab.click();
       await page.waitForTimeout(1200);
     }
   } catch {}
 
-  // Some pages render more after a scroll
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  // Wait for any news anchor to appear (up to 60s)
+  try {
+    await page.waitForSelector('a[href*="/news/"]', { timeout: 60000 });
+  } catch {
+    // Dump a bit of HTML to logs for debugging
+    const html = await page.content();
+    console.log('First 2000 chars of HTML:\n', html.slice(0, 2000));
+  }
+
+  // Scroll a bit to trigger lazy content
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
   await page.waitForTimeout(600);
 
-  // Grab links from DOM (rendered HTML)
+  // Collect links from the rendered DOM
   const raw = await page.$$eval('a[href*="/news/"]', (as) => {
     const out = [];
     const seen = new Set();
     for (const a of as) {
       let href = a.getAttribute('href') || '';
-      const text = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+      let text = (a.textContent || a.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
 
-      // Normalize to absolute
       if (href && !href.startsWith('http')) {
         if (href.startsWith('//')) href = 'https:' + href;
         else if (href.startsWith('/')) href = 'https://ua.tribuna.com' + href;
@@ -48,26 +76,22 @@ async function run() {
       }
 
       if (!href) continue;
-      // Accept /news/123456 or /news/123456-title
-      if (!/\/news\/\d+(?:[-/]|$)/.test(href)) continue;
-      if (/\/video|\/live/i.test(href)) continue; // skip video/live if present
+      if (!/\/news\/\d+(?:[-/]|$)/.test(href)) continue; // accept /news/123456 or /news/123456-title
+      if (/\/video|\/live/i.test(href)) continue;        // skip video/live
       if (seen.has(href)) continue;
       seen.add(href);
 
       out.push({ href, title: text || href });
-      if (out.length >= 100) break; // raw pool; we’ll trim later
+      if (out.length >= 100) break;
     }
     return out;
   });
 
   await browser.close();
 
-  // Keep top unique items
   const items = Array.from(new Map(raw.map(i => [i.href, i])).values()).slice(0, MAX_ITEMS);
-
-  // Log to Actions output (helps debugging)
   console.log(`Collected ${items.length} items`);
-  items.slice(0, 5).forEach((i, idx) => console.log(`#${idx+1}`, i.title, i.href));
+  items.slice(0, 5).forEach((i, idx) => console.log(`#${idx + 1}`, i.title, i.href));
 
   const now = new Date().toUTCString();
   const rssItems = items.map(it => `
