@@ -7,6 +7,8 @@ const MAX_ITEMS = 25;
 
 const esc = (s='') => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+console.log('USING DOMCONTENTLOADED BUILD');
+
 async function run() {
   const browser = await chromium.launch({
     headless: true,
